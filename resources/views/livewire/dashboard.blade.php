@@ -8,9 +8,42 @@
                     <span wire:loading.remove wire:target="exportBackup">💾 Backup Semua Data</span>
                     <span wire:loading wire:target="exportBackup">⏳ Generating...</span>
                 </button>
+
+                <div style="display: inline-block;">
+                    <input type="file" wire:model="backupFile" id="backupInput" style="display: none;" accept=".zip">
+                    <button type="button" onclick="document.getElementById('backupInput').click()"
+                        class="btn btn-warning" style="background-color: #f59e0b; color: white; border: none;">
+                        <span wire:loading.remove wire:target="backupFile, importRestore, confirmRestore">♻️ Restore
+                            Data</span>
+                        <span wire:loading wire:target="backupFile">⏳ Uploading...</span>
+                        <span wire:loading wire:target="importRestore, confirmRestore">⏳ Restoring...</span>
+                    </button>
+                </div>
+                @error('backupFile') <span class="error" style="color: red; font-size: 0.9em;">{{ $message }}</span>
+                @enderror
             </div>
         </div>
     </div>
+
+    <!-- Restore Confirmation Modal -->
+    @if($showRestoreConfirm)
+        <div
+            style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 1000;">
+            <div class="card" style="max-width: 500px; padding: 30px; text-align: center;">
+                <h3 style="color: #f59e0b; margin-bottom: 20px;">⚠️ Konfirmasi Restore</h3>
+                <p style="margin-bottom: 20px;">
+                    <strong>PERINGATAN:</strong> Restore akan <span style="color: red;">MENGGANTI SEMUA</span> data database
+                    dengan data dari file backup ZIP.
+                </p>
+                <p style="margin-bottom: 30px;">Apakah Anda yakin ingin melanjutkan?</p>
+                <div style="display: flex; gap: 15px; justify-content: center;">
+                    <button wire:click="cancelRestore" class="btn btn-secondary">❌ Batal</button>
+                    <button wire:click="confirmRestore" class="btn" style="background-color: #f59e0b; color: white;">✅ Ya,
+                        Restore</button>
+                </div>
+            </div>
+        </div>
+    @endif
 
     <!-- Stats Cards -->
     <div class="stats-grid"

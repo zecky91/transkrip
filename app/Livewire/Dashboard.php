@@ -6,9 +6,38 @@ use App\Models\Student;
 use App\Models\Grade;
 use App\Models\Semester;
 use Livewire\Component;
+use Livewire\WithFileUploads;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\File;
+use ZipArchive;
 
 class Dashboard extends Component
 {
+    use WithFileUploads;
+
+    public $backupFile;
+    public $showRestoreConfirm = false;
+
+    public function updatedBackupFile()
+    {
+        // File upload completed, show confirmation
+        $this->showRestoreConfirm = true;
+    }
+
+    public function confirmRestore()
+    {
+        $this->showRestoreConfirm = false;
+        $this->importRestore();
+    }
+
+    public function cancelRestore()
+    {
+        $this->showRestoreConfirm = false;
+        $this->reset('backupFile');
+    }
+
     public function render()
     {
         // Total students
@@ -86,58 +115,98 @@ class Dashboard extends Component
 
     public function exportBackup()
     {
-        return response()->streamDownload(function () {
-            $writer = new \OpenSpout\Writer\XLSX\Writer();
-            $writer->openToFile('php://output');
+        // Run Spatie backup command
+        Artisan::call('backup:run', ['--only-db' => true]);
 
-            // Sheet 1: Students
-            $sheet = $writer->getCurrentSheet();
-            $sheet->setName('Data Siswa');
+        // Find the latest backup file
+        $backupDisk = Storage::disk('local');
+        $backupPath = config('backup.backup.destination.disks')[0] ?? 'local';
+        $files = $backupDisk->files('Laravel');
 
-            $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues([
-                'NISN',
-                'Nama',
-                'Kelas',
-                'Program'
-            ]));
+        if (empty($files)) {
+            $this->js("alert('Backup failed: No backup file found.')");
+            return;
+        }
 
-            $students = Student::all();
-            foreach ($students as $student) {
-                $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues([
-                    $student->nisn,
-                    $student->nama,
-                    $student->kelas,
-                    $student->program
-                ]));
+        // Get the most recent backup
+        usort($files, function ($a, $b) use ($backupDisk) {
+            return $backupDisk->lastModified($b) - $backupDisk->lastModified($a);
+        });
+
+        $latestBackup = $files[0];
+        $backupFullPath = $backupDisk->path($latestBackup);
+
+        return response()->download($backupFullPath, 'backup_' . date('Y-m-d_His') . '.zip');
+    }
+
+    public function importRestore()
+    {
+        $this->validate([
+            'backupFile' => 'required|file|mimes:zip',
+        ]);
+
+        $zipPath = $this->backupFile->getRealPath();
+        $extractPath = storage_path('app/temp_restore');
+
+        // Clean up any previous extraction
+        if (File::isDirectory($extractPath)) {
+            File::deleteDirectory($extractPath);
+        }
+        File::makeDirectory($extractPath, 0755, true);
+
+        // DB::beginTransaction(); // Removed to avoid nested transaction error
+
+        try {
+            // Extract ZIP file
+            $zip = new ZipArchive();
+            if ($zip->open($zipPath) !== true) {
+                throw new \Exception('Failed to open ZIP file');
+            }
+            $zip->extractTo($extractPath);
+            $zip->close();
+
+            // Find SQL dump file in extracted contents
+            $sqlFile = null;
+            $files = File::allFiles($extractPath);
+            foreach ($files as $file) {
+                if ($file->getExtension() === 'sql') {
+                    $sqlFile = $file->getPathname();
+                    break;
+                }
             }
 
-            // Sheet 2: Grades
-            $writer->addNewSheetAndMakeItCurrent();
-            $sheet2 = $writer->getCurrentSheet();
-            $sheet2->setName('Data Nilai');
-
-            $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues([
-                'NISN',
-                'Nama Siswa',
-                'Semester',
-                'Tipe',
-                'Mata Pelajaran',
-                'Nilai'
-            ]));
-
-            $grades = Grade::with(['student', 'semester'])->get();
-            foreach ($grades as $grade) {
-                $writer->addRow(\OpenSpout\Common\Entity\Row::fromValues([
-                    $grade->student_nisn,
-                    $grade->student->nama ?? '-',
-                    $grade->semester->semester_number ?? '-',
-                    $grade->semester->type ?? '-',
-                    $grade->subject_name,
-                    $grade->value
-                ]));
+            if (!$sqlFile) {
+                throw new \Exception('No SQL file found in backup ZIP');
             }
 
-            $writer->close();
-        }, 'backup_leger_' . date('Y-m-d_His') . '.xlsx');
+            // Read and execute SQL dump
+            // DB::statement('PRAGMA foreign_keys = OFF;'); // Handled by dump
+
+            // Wipe database to ensure clean state and prevent unique constraint errors
+            Artisan::call('db:wipe', ['--force' => true]);
+
+            $sql = File::get($sqlFile);
+            DB::unprepared($sql);
+
+            // DB::statement('PRAGMA foreign_keys = ON;'); // Handled by dump
+            // DB::commit(); // Removed to avoid nested transaction error
+
+            // Cleanup
+            File::deleteDirectory($extractPath);
+
+            $this->js("alert('Restore berhasil! Data telah dipulihkan.')");
+            $this->reset('backupFile');
+
+        } catch (\Exception $e) {
+            // DB::rollBack(); // Removed to avoid nested transaction error
+            // DB::statement('PRAGMA foreign_keys = ON;');
+
+            // Cleanup on error
+            if (File::isDirectory($extractPath)) {
+                File::deleteDirectory($extractPath);
+            }
+
+            $this->addError('backupFile', 'Restore gagal: ' . $e->getMessage());
+        }
     }
 }

@@ -11,7 +11,8 @@
         "laravel/tinker": "^2.10.1",
         "league/csv": "^9.28",
         "livewire/livewire": "^3.7",
-        "openspout/openspout": "^5.2"
+        "openspout/openspout": "^5.2",
+        "spatie/laravel-backup": "^9.3"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",

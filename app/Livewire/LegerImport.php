@@ -40,9 +40,90 @@ class LegerImport extends Component
     public $showPreviewModal = false;
     public $emptyValueAction = 'ignore'; // 'ignore' or 'zero'
 
+    // Edit Mode
+    public $showEditModal = false;
+    public $editingStudent = null;
+    public $editingGrades = [];
+
     public function mount()
     {
         $this->refreshSemesters();
+    }
+
+    public function editStudent($nisn)
+    {
+        $student = Student::where('nisn', $nisn)->first();
+        if (!$student)
+            return;
+
+        // Fetch grades for this student in the current view semester
+        $grades = Grade::where('student_nisn', $nisn)
+            ->where('semester_id', $this->viewSemester->id)
+            ->get()
+            ->pluck('value', 'subject_name')
+            ->toArray();
+
+        // If no grades yet (rare case in view mode but possible), we might want to fetch subjects from other students
+        // For now, only editable if grades exist. Or we can populate keys from existing subjects in that semester.
+        if (empty($grades)) {
+            // Try to find subjects from other students in the same semester to populate empty form
+            $subjects = Grade::where('semester_id', $this->viewSemester->id)
+                ->distinct('subject_name')
+                ->pluck('subject_name')
+                ->toArray();
+
+            foreach ($subjects as $subject) {
+                $grades[$subject] = 0;
+            }
+        }
+
+        $this->editingStudent = $student;
+        $this->editingGrades = $grades;
+        $this->showEditModal = true;
+    }
+
+    public function closeEditModal()
+    {
+        $this->showEditModal = false;
+        $this->editingStudent = null;
+        $this->editingGrades = [];
+    }
+
+    public function saveGrades()
+    {
+        if (!$this->editingStudent || !$this->viewSemester)
+            return;
+
+        foreach ($this->editingGrades as $subject => $value) {
+            // Validate value
+            if (!is_numeric($value))
+                continue;
+            $val = floatval($value);
+            if ($val < 0)
+                $val = 0;
+            if ($val > 100)
+                $val = 100;
+
+            Grade::updateOrCreate(
+                [
+                    'student_nisn' => $this->editingStudent->nisn,
+                    'semester_id' => $this->viewSemester->id,
+                    'subject_name' => $subject
+                ],
+                ['value' => $val]
+            );
+        }
+
+        // Trigger recalculation for this student
+        $this->editingStudent->updateAverages();
+
+        $this->closeEditModal();
+
+        // Refresh view data to show new average
+        $this->loadSemesterData($this->viewSemester->semester_number, $this->viewSemester->type);
+
+        session()->flash('message', "Nilai siswa {$this->editingStudent->nama} berhasil diperbarui.");
+        $this->js("alert('Nilai berhasil diperbarui!')");
     }
 
     public function refreshSemesters()
@@ -463,6 +544,34 @@ class LegerImport extends Component
 
         $this->showViewModal = true;
         $this->dispatch('open-modal', name: 'modal-view');
+    }
+
+    public function deleteSemesterData($semesterNumber, $type = 'academic')
+    {
+        $semester = Semester::where('semester_number', $semesterNumber)
+            ->where('type', $type)
+            ->first();
+
+        if (!$semester) {
+            session()->flash('error', 'Semester tidak ditemukan.');
+            return;
+        }
+
+        if ($semester->is_locked) {
+            session()->flash('error', 'Gagal menghapus: Semester terkunci.');
+            return;
+        }
+
+        // Delete all grades for this semester
+        Grade::where('semester_id', $semester->id)->delete();
+
+        // Update student averages (optional, but good for consistency)
+        // Since we deleted grades, we should ideally trigger recalculation or just let it be updated on next import
+        // For now, let's keep it simple. If needed, we can trigger re-calc for all students involved.
+
+        $this->showViewModal = false;
+        $this->refreshSemesters();
+        session()->flash('message', "Data nilai Semester $semesterNumber ($type) berhasil dihapus.");
     }
 
     public function checkMissing($semesterNumber, $type = 'academic')

@@ -167,6 +167,9 @@
                                 <th>Nama</th>
                                 <th>Rata-rata</th>
                                 <th>Jml Mapel</th>
+                                @if(Auth::user()->role === 'admin' && !$viewSemester->is_locked)
+                                    <th>Aksi</th>
+                                @endif
                             </tr>
                         </thead>
                         <tbody>
@@ -176,6 +179,13 @@
                                     <td>{{ $data['nama'] }}</td>
                                     <td>{{ number_format($data['average'], 2) }}</td>
                                     <td>{{ $data['count'] }}</td>
+                                    @if(Auth::user()->role === 'admin' && !$viewSemester->is_locked)
+                                        <td>
+                                            <button wire:click="editStudent('{{ $data['nisn'] }}')" class="btn btn-small btn-secondary text-xs" style="padding: 2px 8px;">
+                                                ✏️ Edit
+                                            </button>
+                                        </td>
+                                    @endif
                                 </tr>
                             @empty
                                 <tr>
@@ -184,6 +194,19 @@
                             @endforelse
                         </tbody>
                     </table>
+                </div>
+                <div class="modal-actions" style="margin-top: 15px; display: flex; justify-content: space-between; padding-top: 15px; border-top: 1px solid #eee;">
+                    @if(Auth::user()->role === 'admin' && !$viewSemester->is_locked)
+                        <button 
+                            wire:click="deleteSemesterData({{ $viewSemester->semester_number }}, '{{ $viewSemester->type }}')"
+                            wire:confirm="⚠️ PERINGATAN: Apakah Anda yakin ingin MENGHAPUS SEMUA data nilai untuk Semester {{ $viewSemester->semester_number }} ({{ $viewSemester->type }})? Tindakan ini tidak dapat dibatalkan!"
+                            class="btn btn-danger">
+                            🗑️ Hapus Data
+                        </button>
+                    @else
+                        <div></div>
+                    @endif
+                    <button wire:click="$set('showViewModal', false)" class="btn btn-secondary">Tutup</button>
                 </div>
             </div>
         </div>
@@ -340,6 +363,56 @@
                     <button wire:click="confirmImport" class="btn btn-primary">
                         💾 Proses Import
                     </button>
+                </div>
+            </div>
+        </div>
+    @endif
+
+    <!-- Modal Edit Grades -->
+    @if($showEditModal && $editingStudent)
+        <div class="modal show" style="display: flex; z-index: 1100;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>✏️ Edit Nilai: {{ $editingStudent->nama }}</h3>
+                    <button wire:click="closeEditModal" class="modal-close">&times;</button>
+                </div>
+                
+                <div class="student-info" style="margin-bottom: 15px; padding: 10px; background: #f8fafc; border-radius: 4px;">
+                    <p style="margin: 0; font-size: 0.9em;"><strong>NISN:</strong> {{ $editingStudent->nisn }}</p>
+                    <p style="margin: 0; font-size: 0.9em;"><strong>Kelas:</strong> {{ $editingStudent->kelas }}</p>
+                </div>
+
+                <div class="table-container" style="max-height: 400px; overflow-y: auto;">
+                    <form wire:submit.prevent="saveGrades">
+                        <table class="table-edit">
+                            <thead>
+                                <tr>
+                                    <th>Mata Pelajaran</th>
+                                    <th width="100">Nilai</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach($editingGrades as $subject => $value)
+                                    <tr>
+                                        <td style="padding: 8px;">{{ $subject }}</td>
+                                        <td style="padding: 8px;">
+                                            <input type="number" 
+                                                wire:model="editingGrades.{{ $subject }}" 
+                                                min="0" max="100" 
+                                                step="0.01"
+                                                class="form-control" 
+                                                style="width: 100%; padding: 5px; border: 1px solid #ddd; border-radius: 4px;">
+                                        </td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                        
+                        <div class="modal-actions" style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px;">
+                            <button type="button" wire:click="closeEditModal" class="btn btn-secondary">Batal</button>
+                            <button type="submit" class="btn btn-primary">💾 Simpan Perubahan</button>
+                        </div>
+                    </form>
                 </div>
             </div>
         </div>
